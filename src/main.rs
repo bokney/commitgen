@@ -25,6 +25,18 @@ impl GeminiClient {
         );
         Self { api_key, endpoint }
     }
+    
+    pub fn parse_response_json(v: &serde_json::Value) -> anyhow::Result<String> {
+        v.get("candidates")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("content"))
+            .and_then(|c| c.get("parts"))
+            .and_then(|p| p.get(0))
+            .and_then(|p| p.get("text"))
+            .and_then(|t| t.as_str())
+            .map(|s| s.trim().to_string())
+            .ok_or_else(|| anyhow::anyhow!("Failed to extract message. Response: {}", v))
+    }
 }
 
 #[async_trait::async_trait]
@@ -50,18 +62,7 @@ impl LLMClient for GeminiClient {
         }
 
         let v: Value = resp.json().await?;
-
-        let message = v
-            .get("candidates")
-            .and_then(|c| c.get(0))
-            .and_then(|c| c.get("content"))
-            .and_then(|c| c.get("parts"))
-            .and_then(|p| p.get(0))
-            .and_then(|p| p.get("text"))
-            .and_then(|t| t.as_str())
-            .map(|s| s.trim().to_string());
-
-        message.ok_or_else(|| anyhow::anyhow!("Failed to extract message. Response: {}", v))
+        Self::parse_response_json(&v)
     }
 }
 
@@ -117,5 +118,80 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use serde_json::json;
+    use async_trait::async_trait;
+
+    struct FakeClient;
+    #[async_trait]
+    impl LLMClient for FakeClient {
+        async fn generate(&self, _prompt: &str) -> Result<String> {
+            Ok("chore: add unit tests".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_generate_with_fake_client() {
+        let fake = FakeClient;
+        let result = fake.generate("test prompt").await.unwrap();
+        assert_eq!(result, "chore: add unit tests");
+    }
+
+    #[test]
+    fn test_parse_response_json_success() {
+        let data = json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": "Commit message here"
+                    }]
+                }
+            }]
+        });
+
+        let result = GeminiClient::parse_response_json(&data).unwrap();
+        assert_eq!(result, "Commit message here");
+    }
+
+    #[test]
+    fn test_parse_response_json_missing_fields() {
+        let data = json!({
+            "wrong_key": []
+        });
+
+        let result = GeminiClient::parse_response_json(&data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_response_json_empty_candidates() {
+        let data = json!({
+            "candidates": []
+        });
+
+        let result = GeminiClient::parse_response_json(&data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_response_json_text_not_string() {
+        let data = json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": 1234
+                    }]
+                }
+            }]
+        });
+
+        let result = GeminiClient::parse_response_json(&data);
+        assert!(result.is_err());
+    }
 }
 
