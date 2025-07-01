@@ -52,7 +52,15 @@ cargo run -- "add login support" --style "gitmoji"
 
 ## 🧪 Testing
 
-You can inject mock implementations of `LLMClient` for unit tests without making real HTTP calls.
+This project includes unit tests covering:
+
+- **Trait abstraction**: Using a `FakeClient` to test `LLMClient` implementations without HTTP.
+- **JSON parsing**: Tests for `GeminiClient::parse_response_json` against success and various failure scenarios.
+
+Run the full test suite with:
+```bash
+cargo test
+```
 
 ## 📜 License
 
